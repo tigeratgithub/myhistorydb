@@ -1,0 +1,31 @@
+{
+    "tasks": [
+        {
+            "symbol": "MNQ",
+            "bar_size": "3 mins",
+            "slice_days": 7,
+            "start_year": 2024
+        },
+        {
+            "symbol": "MNQ",
+            "bar_size": "15 mins",
+            "slice_days": 30,
+            "start_year": 2024
+        },
+        {
+            "symbol": "MGC",
+            "bar_size": "3 mins",
+            "slice_days": 7,
+            "start_year": 2024
+        },
+        {
+            "symbol": "MGC",
+            "bar_size": "15 mins",
+            "slice_days": 30,
+            "start_year": 2024
+        }
+    ],
+    "db_settings": {
+        "db_name": "futures_data.db"
+    }
+}
