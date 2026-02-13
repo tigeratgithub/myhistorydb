@@ -20,7 +20,12 @@ class Collector:
 
     async def _connect(self):
         if not self.ib.isConnected():
+            # 随机化 ClientId 并增加等待，防止频繁连接导致 IB 拒绝
+            import random, time
+            if self.client_id < 1000:
+                self.client_id = random.randint(1000, 9999)
             print(f"Connecting to IB Gateway (ClientId: {self.client_id})...")
+            await asyncio.sleep(2)
             await self.ib.connectAsync('127.0.0.1', 4002, clientId=self.client_id)
 
     def _init_db(self):
@@ -131,6 +136,10 @@ class Collector:
                     for cal in calendar:
                         s_dt = max(cal['active_start'].replace(tzinfo=None) - timedelta(days=OVERLAP_DAYS), active_start)
                         e_dt = min(cal['active_end'].replace(tzinfo=None) + timedelta(days=OVERLAP_DAYS), active_end)
+                        
+                        # Debug info
+                        print(f"Checking {cal['code']}: Cal range {cal['active_start'].date()}~{cal['active_end'].date()} | Intersect: {s_dt.date()}~{e_dt.date()}")
+                        
                         if s_dt >= e_dt: continue
                         
                         ib_contract = Contract(
@@ -138,13 +147,18 @@ class Collector:
                             exchange='CME' if symbol=='MNQ' else 'COMEX', currency='USD', includeExpired=True
                         )
                         qualified = await self.ib.qualifyContractsAsync(ib_contract)
-                        if not qualified: continue
+                        if not qualified:
+                            print(f"  Warning: Could not qualify contract {cal['code']} ({cal['expiry_month']}). Skipping.")
+                            continue
+                        
                         ib_contract = qualified[0]
+                        print(f"  Contract: {cal['code']} ({s_dt.date()} to {e_dt.date()})")
                         
                         curr_end = e_dt
                         while curr_end > s_dt:
                             # 确定分片时长
                             fetch_duration = duration_str if duration_str else f"{(curr_end - s_dt).days + 1} D"
+                            
                             
                             # IB API 要求 endDateTime 为字符串格式，使用 23:59:59 确保包含当天数据
                             end_str = curr_end.strftime('%Y%m%d') + ' 23:59:59'
@@ -157,6 +171,9 @@ class Collector:
                                     curr_end -= timedelta(days=slice_days if slice_days else 1)
                                     continue
                                 
+                                # 将时间列转换为字符串以适配 sqlite3
+                                df['time'] = df['time'].astype(str)
+                                
                                 # 使用 INSERT OR IGNORE 逐行写入，避免 UNIQUE 冲突导致整批失败
                                 cursor = conn.cursor()
                                 for _, row in df.iterrows():
@@ -165,7 +182,8 @@ class Collector:
                                             f"INSERT OR IGNORE INTO {table_name} (time, open, high, low, close, volume, average, barCount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                                             (row['time'], row['open'], row['high'], row['low'], row['close'], row['volume'], row['average'], row['barCount'])
                                         )
-                                    except: pass
+                                    except Exception as e:
+                                        print(f"SQL Insert Error: {e}")
                                 conn.commit()
                                 
                                 # 获取这批数据里最早的时间点
@@ -183,18 +201,23 @@ class Collector:
                                 else:
                                     new_end = curr_end - timedelta(days=slice_days if slice_days else 1)
                                 
+                                print(f"    Earliest data point: {earliest} ({type(earliest)}) -> New end: {new_end}")
+
                                 # 如果 new_end 没有往前推进，强制推 1 天避免死循环
                                 if new_end >= curr_end:
-                                    new_end = curr_end - timedelta(days=1)
+                                    # 对于分钟线，1 天可能不够，尝试根据 slice_days 回退
+                                    backstep = slice_days if slice_days else 1
+                                    print(f"    Forcing backup {backstep} days (stuck at {curr_end})")
+                                    new_end = curr_end - timedelta(days=backstep)
                                 
                                 curr_end = new_end
                                 
                                 # 如果已经抓到了 s_dt 之前，可以结束这个合约
                                 if curr_end <= s_dt:
+                                    print(f"    Reached start date {s_dt} for {cal['code']}.")
                                     break
                             else:
-                                # 无 bars 返回，通常意味着到了数据尽头
-                                print(f"    No more bars for {symbol} {cal['code']} ending {curr_end}")
+                                print(f"    IB returned None for {cal['code']} ending {curr_end}.")
                                 break
                             
                             await asyncio.sleep(11)
