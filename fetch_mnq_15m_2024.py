@@ -2,7 +2,7 @@ import asyncio
 from ibhistorydb import Collector, Viewer
 
 async def fetch_15m_data():
-    db_file = 'mnq_2024_15m.db'
+    db_file = 'ib_2024_2025.db'
     
     # 1. 初始化收集器
     col = Collector(client_id=130, db=db_file)
@@ -16,10 +16,10 @@ async def fetch_15m_data():
     # - 合约换月边界 10天重叠 (collector.py)
     # - 唯一索引去重 (INSERT OR IGNORE)
     await col.sync(
-        symbols=['MNQ'],
-        timeframes=['15m'],
+        symbols=['MNQ', 'MGC'],
+        timeframes=['3m', '15m', '1d'],
         start='2024-01-01',
-        end='2024-12-31',
+        # end='2024-12-31',
         mode='full'
     )
     
